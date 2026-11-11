@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake & PDFs</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: monospace, Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Top-Left Corner Master Trigger (Strictly 20px x 20px Invisible) */
+        #toggleBtn {
+            opacity: 0;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 99px !important;
+            height: 99px !important;
+            min-width: 99px !important;
+            max-width: 99px !important;
+            min-height: 99px !important;
+            max-height: 99px !important;
+            padding: 0;
+            margin: 0;
+            border: none;
+            outline: none;
+            background: transparent;
+            cursor: default;
+            z-index: 30000;
+        }
+
+        /* Document Dashboard Container */
+        .doc-content {
+            display: none;
+            min-height: 100vh;
+            width: 100vw;
+            position: relative;
+            padding: 20px;
+            box-sizing: border-box;
+            background-color: #121212;
+        }
+
+        .doc-content.show {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 20px;
+        }
+
+        /* Draggable & Resizable PDF Window Frame */
+        .pdf-wrapper {
+            position: relative;
+            border: 2px solid #444;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: move;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            display: inline-block;
+            background: #1e1e1e;
+            user-select: none;
+            width: 48vw;
+            height: 85vh;
+        }
+
+        .pdf-wrapper iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            pointer-events: auto;
+        }
+
+        .pdf-wrapper.dragging iframe {
+            pointer-events: none;
+        }
+
+        /* Resize Handles */
+        .resize-handle {
+            position: absolute;
+            background: #777;
+            border: 1px solid #111;
+            z-index: 101;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease-in-out, background 0.2s;
+        }
+
+        .pdf-wrapper:hover .resize-handle {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .resize-handle:hover { background: #fff; }
+
+        .resize-handle.nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+        .resize-handle.ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+        .resize-handle.sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+        .resize-handle.se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+
+        .resize-handle.n { top: 0; left: 50%; transform: translateX(-50%); width: 20px; height: 6px; cursor: ns-resize; }
+        .resize-handle.s { bottom: 0; left: 50%; transform: translateX(-50%); width: 20px; height: 6px; cursor: ns-resize; }
+        .resize-handle.e { right: 0; top: 50%; transform: translateY(-50%); height: 20px; width: 6px; cursor: ew-resize; }
+        .resize-handle.w { left: 0; top: 50%; transform: translateY(-50%); height: 20px; width: 6px; cursor: ew-resize; }
+
+        /* Classic Retro Snake Modal Overlay */
+        .snake-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000000;
+            z-index: 25000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .snake-modal.show {
+            display: flex;
+        }
+
+        .snake-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            background: #000000;
+            padding: 20px;
+        }
+
+        .snake-canvas {
+            background: #000000;
+            border: 4px solid #ffffff;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+        }
+
+        .snake-hint {
+            font-size: 13px;
+            color: #888;
+            font-family: monospace;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body class="is-snake">
+
+    <!-- Master Invisible 20px x 20px Top-Left Corner Toggle Button -->
+    <button id="toggleBtn" aria-label="Toggle Dashboard"></button>
+    
+    <!-- PDF Viewer Dashboard Container -->
+    <div id="docContainer" class="doc-content"></div>
+
+    <!-- Permanent Classic Black & White Snake Display -->
+    <div id="snakeModal" class="snake-modal show">
+        <div class="snake-container">
+            <canvas id="snakeCanvas" class="snake-canvas" width="600" height="400"></canvas>
+            <span class="snake-hint">SNAKE — USE ARROW KEYS TO CONTROL & RESTART</span>
+        </div>
+    </div>
+
+    <script>
+        const btn = document.getElementById('toggleBtn');
+        const container = document.getElementById('docContainer');
+        const snakeModal = document.getElementById('snakeModal');
+        const snakeCanvas = document.getElementById('snakeCanvas');
+        const ctx = snakeCanvas.getContext('2d');
+
+        // State: 1 = Snake (Default), 2 = PDF Dashboard
+        let currentState = 1;
+        let isLayoutInitialized = false;
+        let maxZIndex = 100;
+
+        /* --- Retro Black & White Snake Engine --- */
+        let snakeAnimationId = null;
+        const gridSize = 20;
+        const tileCountX = snakeCanvas.width / gridSize;
+        const tileCountY = snakeCanvas.height / gridSize;
+
+        let snake = [{ x: 10, y: 10 }];
+        let velocityX = 1;
+        let velocityY = 0;
+        let foodX = 15;
+        let foodY = 15;
+        let score = 0;
+        let gameOver = false;
+        let lastRenderTime = 0;
+        const snakeSpeed = 10; // moves per second
+
+        function placeFood() {
+            foodX = Math.floor(Math.random() * tileCountX);
+            foodY = Math.floor(Math.random() * tileCountY);
+            snake.forEach(part => {
+                if (part.x === foodX && part.y === foodY) placeFood();
+            });
+        }
+
+        function resetSnake() {
+            snake = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+            velocityX = 1;
+            velocityY = 0;
+            score = 0;
+            gameOver = false;
+            placeFood();
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (currentState !== 1) return;
+            
+            if (gameOver) {
+                resetSnake();
+                return;
+            }
+
+            switch (e.key) {
+                case 'ArrowUp':
+                    if (velocityY !== 1) { velocityX = 0; velocityY = -1; }
+                    break;
+                case 'ArrowDown':
+                    if (velocityY !== -1) { velocityX = 0; velocityY = 1; }
+                    break;
+                case 'ArrowLeft':
+                    if (velocityX !== 1) { velocityX = -1; velocityY = 0; }
+                    break;
+                case 'ArrowRight':
+                    if (velocityX !== -1) { velocityX = 1; velocityY = 0; }
+                    break;
+            }
+        });
+
+        function updateSnake() {
+            if (gameOver) return;
+
+            const head = { x: snake[0].x + velocityX, y: snake[0].y + velocityY };
+
+            // Wall collisions
+            if (head.x < 0 || head.x >= tileCountX || head.y < 0 || head.y >= tileCountY) {
+                gameOver = true;
+                return;
+            }
+
+            // Body collisions
+            for (let i = 0; i < snake.length; i++) {
+                if (snake[i].x === head.x && snake[i].y === head.y) {
+                    gameOver = true;
+                    return;
+                }
+            }
+
+            snake.unshift(head);
+
+            // Food collision
+            if (head.x === foodX && head.y === foodY) {
+                score += 10;
+                placeFood();
+            } else {
+                snake.pop();
+            }
+        }
+
+        function drawSnake() {
+            // Background
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+
+            // Food
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(foodX * gridSize + 2, foodY * gridSize + 2, gridSize - 4, gridSize - 4);
+
+            // Snake
+            snake.forEach((part, index) => {
+                ctx.fillStyle = index === 0 ? '#ffffff' : '#aaaaaa';
+                ctx.fillRect(part.x * gridSize + 1, part.y * gridSize + 1, gridSize - 2, gridSize - 2);
+            });
+
+            // Score Display
+            ctx.font = 'bold 24px monospace';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'left';
+            ctx.fillText(`SCORE: ${score}`, 15, 30);
+
+            // Game Over overlay
+            if (gameOver) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+                ctx.font = 'bold 36px monospace';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText('GAME OVER', snakeCanvas.width / 2, snakeCanvas.height / 2 - 10);
+                ctx.font = '16px monospace';
+                ctx.fillText('PRESS ANY ARROW KEY TO RESTART', snakeCanvas.width / 2, snakeCanvas.height / 2 + 30);
+            }
+        }
+
+        function snakeLoop(currentTime) {
+            snakeAnimationId = requestAnimationFrame(snakeLoop);
+            const secondsSinceLastRender = (currentTime - lastRenderTime) / 1000;
+            if (secondsSinceLastRender < 1 / snakeSpeed) return;
+            
+            lastRenderTime = currentTime;
+            updateSnake();
+            drawSnake();
+        }
+
+        function startSnake() {
+            if (!snakeAnimationId) {
+                resetSnake();
+                snakeLoop(0);
+            }
+        }
+
+        function stopSnake() {
+            if (snakeAnimationId) {
+                cancelAnimationFrame(snakeAnimationId);
+                snakeAnimationId = null;
+            }
+        }
+
+        /* --- PDF Viewer Setup --- */
+        const pdfSources = [
+            "pdfs/Untitled design.pdf,
+            "pdfs/Untitled design.pdf.pdf,
+        ];
+
+        pdfSources.forEach((src, index) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'pdf-wrapper';
+            wrapper.dataset.id = 'pdf-' + index;
+            
+            wrapper.innerHTML = `
+                <iframe src="${src}"></iframe>
+                <div class="resize-handle nw" data-dir="nw"></div>
+                <div class="resize-handle ne" data-dir="ne"></div>
+                <div class="resize-handle sw" data-dir="sw"></div>
+                <div class="resize-handle se" data-dir="se"></div>
+                <div class="resize-handle n" data-dir="n"></div>
+                <div class="resize-handle s" data-dir="s"></div>
+                <div class="resize-handle e" data-dir="e"></div>
+                <div class="resize-handle w" data-dir="w"></div>
+            `;
+            
+            container.appendChild(wrapper);
+            initInteract(wrapper);
+        });
+
+        function convertLayoutToAbsolute() {
+            if (isLayoutInitialized) return;
+
+            const wrappers = container.querySelectorAll('.pdf-wrapper');
+            const containerRect = container.getBoundingClientRect();
+            const rects = [];
+
+            wrappers.forEach(w => {
+                const r = w.getBoundingClientRect();
+                rects.push({
+                    el: w,
+                    width: r.width,
+                    height: r.height,
+                    left: r.left - containerRect.left,
+                    top: r.top - containerRect.top
+                });
+            });
+
+            rects.forEach(item => {
+                item.el.style.width = item.width + 'px';
+                item.el.style.height = item.height + 'px';
+                item.el.style.left = item.left + 'px';
+                item.el.style.top = item.top + 'px';
+                item.el.style.position = 'absolute';
+            });
+
+            container.style.display = 'block';
+            isLayoutInitialized = true;
+        }
+
+        function bringToFront(element) {
+            maxZIndex++;
+            element.style.zIndex = maxZIndex;
+        }
+
+        /* State Switchers */
+        function showSnake() {
+            currentState = 1;
+            document.body.classList.add('is-snake');
+            container.classList.remove('show');
+            snakeModal.classList.add('show');
+            startSnake();
+        }
+
+        function showDashboard() {
+            currentState = 2;
+            document.body.classList.remove('is-snake');
+            snakeModal.classList.remove('show');
+            stopSnake();
+            container.classList.add('show');
+
+            requestAnimationFrame(() => {
+                convertLayoutToAbsolute();
+            });
+        }
+
+        /* Top-Left Disappearing Master Toggle Action */
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentState === 2) {
+                showSnake();
+            } else {
+                showDashboard();
+            }
+        });
+
+        /* Automatic Panic/Revert Actions Back to Snake */
+        window.addEventListener('blur', (e) => {
+            if (e.target !== window) return;
+            showSnake();
+        });
+
+        window.addEventListener('pagehide', showSnake);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) showSnake();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') showSnake();
+        });
+
+        function initInteract(element) {
+            element.addEventListener('mousedown', (e) => {
+                if (e.target.classList.contains('resize-handle')) return;
+
+                bringToFront(element);
+                element.classList.add('dragging');
+
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startLeft = element.offsetLeft;
+                const startTop = element.offsetTop;
+
+                function doDrag(mEvent) {
+                    element.style.left = (startLeft + mEvent.clientX - startX) + 'px';
+                    element.style.top = (startTop + mEvent.clientY - startY) + 'px';
+                }
+
+                function stopDrag() {
+                    element.classList.remove('dragging');
+                    document.removeEventListener('mousemove', doDrag);
+                    document.removeEventListener('mouseup', stopDrag);
+                }
+
+                document.addEventListener('mousemove', doDrag);
+                document.addEventListener('mouseup', stopDrag);
+            });
+
+            const handles = element.querySelectorAll('.resize-handle');
+            handles.forEach(handle => {
+                handle.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    bringToFront(element);
+                    element.classList.add('dragging');
+
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    const startWidth = element.offsetWidth;
+                    const startHeight = element.offsetHeight;
+                    const startLeft = element.offsetLeft;
+                    const startTop = element.offsetTop;
+                    const dir = handle.dataset.dir;
+
+                    function doResize(mEvent) {
+                        const deltaX = mEvent.clientX - startX;
+                        const deltaY = mEvent.clientY - startY;
+
+                        if (dir.includes('e')) element.style.width = Math.max(200, startWidth + deltaX) + 'px';
+                        if (dir.includes('s')) element.style.height = Math.max(200, startHeight + deltaY) + 'px';
+                        if (dir.includes('w')) {
+                            const newW = Math.max(200, startWidth - deltaX);
+                            element.style.width = newW + 'px';
+                            element.style.left = (startLeft + startWidth - newW) + 'px';
+                        }
+                        if (dir.includes('n')) {
+                            const newH = Math.max(200, startHeight - deltaY);
+                            element.style.height = newH + 'px';
+                            element.style.top = (startTop + startHeight - newH) + 'px';
+                        }
+                    }
+
+                    function stopResize() {
+                        element.classList.remove('dragging');
+                        document.removeEventListener('mousemove', doResize);
+                        document.removeEventListener('mouseup', stopResize);
+                    }
+
+                    document.addEventListener('mousemove', doResize);
+                    document.addEventListener('mouseup', stopResize);
+                });
+            });
+        }
+
+        // Initialize directly into Snake mode
+        showSnake();
+    </script>
+</body>
+</html>
