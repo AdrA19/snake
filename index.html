@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Snakes</title>
+    <title>Snake & PDFs</title>
     <style>
         body {
             margin: 0;
@@ -13,7 +13,7 @@
             overflow: hidden;
         }
 
-        /* Top-Left Corner Master Trigger (Strictly 20px x 20px Invisible) */
+        /* Top-Left Corner Master Trigger (Strictly 99px x 99px Invisible) */
         #toggleBtn {
             opacity: 0;
             position: fixed;
@@ -152,7 +152,7 @@
 </head>
 <body class="is-snake">
 
-    <!-- Master Invisible 20px x 20px Top-Left Corner Toggle Button -->
+    <!-- Master Invisible 99px x 99px Top-Left Corner Toggle Button -->
     <button id="toggleBtn" aria-label="Toggle Dashboard"></button>
     
     <!-- PDF Viewer Dashboard Container -->
@@ -325,8 +325,8 @@
 
         /* --- PDF Viewer Setup --- */
         const pdfSources = [
-            "pdfs/Divisibility and Unit Digit Assignment 60Q English 30-10-26.pdf",
-            "pdfs/Divisibility and Unit digit one shot CW_compressed.pdf",
+            "pdfs/Untitled design.pdf",
+            "pdfs/Untitled design.pdf.pdf"
         ];
 
         pdfSources.forEach((src, index) => {
@@ -416,15 +416,9 @@
             }
         });
 
-        /* Automatic Panic/Revert Actions Back to Snake */
+        /* Safe Focus Handlers (Prevent accidental iframe clicks from triggering snake mode) */
         window.addEventListener('blur', (e) => {
-            if (e.target !== window) return;
-            showSnake();
-        });
-
-        window.addEventListener('pagehide', showSnake);
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) showSnake();
+            if (currentState === 2) return;
         });
 
         document.addEventListener('keydown', (e) => {
